@@ -12,40 +12,86 @@ local parent = {
     type = { "expression_statement" },
 }
 
+--- Modify `nodes` if the found return(s) are **all** bare-returns.
+---
+--- A bare-return is used to return early from a function and aren't meant to be
+--- assigned so they should not be included in docstring output.
+---
+--- If at least one return is not a bare-return then this function does nothing.
+---
+---@param nodes table
+local validate_bare_returns = function(nodes)
+    local return_node = nodes[i.Return]
+    local has_data = false
+
+    for _, value in pairs(return_node) do
+        if value:child_count() > 1
+        then
+            has_data = true
+        end
+    end
+
+    if not has_data
+    then
+        nodes[i.Return] = nil
+    end
+end
+
+
+--- Remove `i.Return` details from `nodes` if a Python generator was found.
+---
+--- If there is at least one `yield` found, Python converts the function to a generator.
+---
+--- In which case, any `return` statement no longer actually functions as an
+--- actual "Returns:" docstring block so we need to strip them.
+---
+---@param nodes table
+local validate_yield_nodes = function(nodes)
+    if nodes[i.Yield] ~= nil and nodes[i.Return] ~= nil
+    then
+        nodes[i.Return] = nil
+    end
+end
+
+
 return {
     -- Search for these nodes
     parent = parent,
-
     -- Traverse down these nodes and extract the information as necessary
     data = {
         func = {
             ["function_definition"] = {
                 ["0"] = {
                     extract = function(node)
-                        local results = {}
-
                         local tree = {
                             {
                                 retrieve = "all",
                                 node_type = "parameters",
                                 subtree = {
-                                    { retrieve = "all", node_type = "identifier", extract = true },
+                                    { retrieve = "all", node_type = "identifier", extract = true, as = i.Parameter },
                                     {
                                         retrieve = "all",
                                         node_type = "default_parameter",
-                                        subtree = { { retrieve = "all", node_type = "identifier", extract = true } },
+                                        subtree = {
+                                            {
+                                                position = 1,
+                                                node_type = "identifier",
+                                                extract = true,
+                                                as = i.Parameter,
+                                            },
+                                        },
                                     },
                                     {
                                         retrieve = "all",
                                         node_type = "typed_parameter",
                                         extract = true,
+                                        as = i.Tparam,
                                     },
                                     {
                                         retrieve = "all",
                                         node_type = "typed_default_parameter",
-                                        as = "typed_parameter",
+                                        as = i.Tparam,
                                         extract = true,
-                                        subtree = { { retrieve = "all", node_type = "identifier", extract = true } },
                                     },
                                     {
                                         retrieve = "first",
@@ -70,6 +116,41 @@ return {
                                         node_type = "return_statement",
                                         recursive = true,
                                         extract = true,
+                                        as = i.Return,
+                                    },
+                                    {
+                                        retrieve = "all",
+                                        node_type = "expression_statement",
+                                        recursive = true,
+                                        subtree = {
+                                            {
+                                                retrieve = "first",
+                                                node_type = "yield",
+                                                recursive = true,
+                                                extract = true,
+                                                as = i.Yield,
+                                            },
+                                        },
+                                    },
+                                    {
+                                        retrieve = "all",
+                                        node_type = "raise_statement",
+                                        recursive = true,
+                                        subtree = {
+                                            {
+                                                retrieve = "first",
+                                                node_type = "call",
+                                                recursive = true,
+                                                subtree = {
+                                                    {
+                                                        retrieve = "first",
+                                                        node_type = "identifier",
+                                                        extract = true,
+                                                        as = i.Throw,
+                                                    }
+                                                }
+                                            },
+                                        },
                                     },
                                 },
                             },
@@ -81,23 +162,32 @@ return {
                             },
                         }
                         local nodes = nodes_utils:matching_nodes_from(node, tree)
-                        if nodes["typed_parameter"] then
-                            results["typed_parameters"] = {}
-                            for _, n in pairs(nodes["typed_parameter"]) do
+                        local temp = {}
+                        if nodes[i.Tparam] then
+                            temp[i.Tparam] = {}
+                            for _, n in pairs(nodes[i.Tparam]) do
                                 local type_subtree = {
                                     { retrieve = "all", node_type = "identifier", extract = true, as = i.Parameter },
-                                    { retrieve = "all", node_type = "type", extract = true, as = i.Type },
+                                    { retrieve = "all", node_type = "type",       extract = true, as = i.Type },
                                 }
                                 local typed_parameters = nodes_utils:matching_nodes_from(n, type_subtree)
                                 typed_parameters = extractors:extract_from_matched(typed_parameters)
-                                table.insert(results["typed_parameters"], typed_parameters)
+                                table.insert(temp[i.Tparam], typed_parameters)
                             end
                         end
+
+                        if nodes[i.Return] then
+                            validate_bare_returns(nodes)
+                        end
+
+                        validate_yield_nodes(nodes)
+
                         local res = extractors:extract_from_matched(nodes)
+                        res[i.Tparam] = temp[i.Tparam]
 
                         -- Return type hints takes precedence over all other types for generating template
                         if res[i.ReturnTypeHint] then
-                            res["return_statement"] = nil
+                            res[i.HasReturn] = nil
                             if res[i.ReturnTypeHint][1] == "None" then
                                 res[i.ReturnTypeHint] = nil
                             end
@@ -105,7 +195,7 @@ return {
 
                         -- Check if the function is inside a class
                         -- If so, remove reference to the first parameter (that can be `self`, `cls`, or a custom name)
-                        if res.identifier and locator({ current = node }, parent.class) then
+                        if res[i.Parameter] and locator({ current = node }, parent.class) then
                             local remove_identifier = true
                             -- Check if function is a static method. If so, will not remove the first parameter
                             if node:parent():type() == "decorated_definition" then
@@ -114,25 +204,46 @@ return {
                                 if decorator == "@staticmethod" then
                                     remove_identifier = false
                                 end
+                            elseif node:parent():parent():type() == "function_definition" then
+                                remove_identifier = false
                             end
+
                             if remove_identifier then
-                                table.remove(res.identifier, 1)
-                                if vim.tbl_isempty(res.identifier) then
-                                    res.identifier = nil
+                                table.remove(res[i.Parameter], 1)
+                                if vim.tbl_isempty(res[i.Parameter]) then
+                                    res[i.Parameter] = nil
                                 end
                             end
                         end
 
-                        results[i.HasParameter] = (res.typed_parameter or res.identifier) and { true } or nil
-                        results[i.Type] = res.type
-                        results[i.Parameter] = res.identifier
-                        results[i.Return] = res.return_statement
-                        results[i.ReturnTypeHint] = res[i.ReturnTypeHint]
-                        results[i.HasReturn] = (res.return_statement or res.anonymous_return or res[i.ReturnTypeHint])
-                            and { true }
-                            or nil
-                        results[i.ArbitraryArgs] = res[i.ArbitraryArgs]
-                        results[i.Kwargs] = res[i.Kwargs]
+                        local results = helpers.copy({
+                                [i.HasParameter] = function(t)
+                                    return (t[i.Parameter] or t[i.Tparam]) and { true }
+                                end,
+                                [i.HasReturn] = function(t)
+                                    return (t[i.ReturnTypeHint] or t[i.Return]) and { true }
+                                end,
+                                [i.HasThrow] = function(t)
+                                    return t[i.Throw] and { true }
+                                end,
+                                [i.Type] = true,
+                                [i.Parameter] = true,
+                                [i.Return] = true,
+                                [i.ReturnTypeHint] = true,
+                                [i.HasYield] = function(t)
+                                    return t[i.Yield] and { true }
+                                end,
+                                [i.ArbitraryArgs] = true,
+                                [i.Kwargs] = true,
+                                [i.Throw] = true,
+                                [i.Tparam] = true,
+                            }, res) or {}
+
+                        -- Removes generation for returns that are not typed
+                        if results[i.ReturnTypeHint] then
+                            results[i.Return] = nil
+                        end
+
                         return results
                     end,
                 },
@@ -181,13 +292,21 @@ return {
                             return {}
                         end
 
+                        -- Deliberately check inside the init function for assignments to "self"
                         results[i.ClassAttribute] = {}
                         for _, assignment in pairs(nodes["assignment"]) do
-                            local left_side = assignment:field("left")[1]
-                            local left_attribute = left_side:field("attribute")[1]
-                            left_attribute = helpers.get_node_text(left_attribute)[1]
-                            if left_attribute and not vim.startswith(left_attribute, "_") then
-                                table.insert(results[i.ClassAttribute], left_attribute)
+                            -- Getting left side in assignment
+                            local left = assignment:field("left")
+
+                            -- Checking if left side is an "attribute", which means assigning to an attribute to the function
+                            if not vim.tbl_isempty(left) and not vim.tbl_isempty(left[1]:field("attribute")) then
+                                --Adding it to the list
+                                local left_attribute = assignment:field("left")[1]:field("attribute")[1]
+                                left_attribute = helpers.get_node_text(left_attribute)[1]
+
+                                if not vim.startswith(left_attribute, "_") then
+                                    table.insert(results[i.ClassAttribute], left_attribute)
+                                end
                             end
                         end
                         if vim.tbl_isempty(results[i.ClassAttribute]) then
@@ -216,12 +335,10 @@ return {
             },
         },
     },
-
     -- Use default granulator and generator
     locator = nil,
     granulator = nil,
     generator = nil,
-
     template = template
         :config({
             append = { position = "after", child_name = "comment", fallback = "block", disabled = { "file" } },

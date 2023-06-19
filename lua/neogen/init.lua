@@ -148,8 +148,8 @@ neogen.configuration = {
 --- Neogen will go until the start of the function and start annotating for you.
 ---
 ---@param opts table Optional configs to change default behaviour of generation.
----  - {opts.type} `(string, default: "func")` Which type we are trying to use for generating annotations.
----    Currently supported: `func`, `class`, `type`, `file`
+---  - {opts.type} `(string, default: "any")` Which type we are trying to use for generating annotations.
+---    Currently supported: `any`, `func`, `class`, `type`, `file`
 ---  - {opts.annotation_convention} `(table)` convention to use for generating annotations.
 ---    This is language specific. For example, `generate({ annotation_convention = { python = 'numpydoc' } })`
 ---    If no convention is specified for a specific language, it'll use the default annotation convention for the language.
@@ -239,8 +239,27 @@ end
 ---@eval return MiniDoc.afterlines_to_code(MiniDoc.current.eval_section)
 ---@text # Changelog~
 ---
---- Note: We will only document `major` and `minor` versions, not `patch` ones.
+--- Note: We will only document `major` and `minor` versions, not `patch` ones. (only X and Y in X.Y.z)
 ---
+--- ## 2.15.0~
+---   - Google docstrings now include "Yields:", whenever possible
+--- ## 2.14.0~
+---   - Google docstrings now include "Raises:", whenever possible
+--- ## 2.13.0~
+---   - Improve google docstrings template (#124)
+---   - Fix minor python retriever issues (#124)
+--- ## 2.12.0~
+---   - Fetch singleton methods in ruby (#121)
+--- ## 2.11.0~
+---   - Calling `:Neogen` will try to find the best type used to generate annotations (#116)
+---     It'll recursively go up the syntax tree from the cursor position.
+---     For example, if a function is defined inside class and the cursor is inside the function,
+---     the annotation will be generated for the function.
+--- ## 2.10.0~
+---   - Add support for Throw statements in python
+---     Note: only active for reST template as of right now (please open an issue request for more templates)
+--- ## 2.9.0~
+---   - Add support for `vsnip` snippet engine ! (see |neogen-snippet-integration|)
 --- ## 2.8.0~
 ---   - Specify annotation convention on `generate()` method (see |neogen.generate()|)
 --- ## 2.7.0~
@@ -280,7 +299,7 @@ end
 ---     with multiple annotation conventions.
 ---@tag neogen-changelog
 ---@toc_entry Changes in neogen plugin
-neogen.version = "2.8.0"
+neogen.version = "2.15.2"
 --minidoc_afterlines_end
 
 return neogen

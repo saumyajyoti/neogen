@@ -38,6 +38,20 @@
 
 Use your favorite package manager to install Neogen, e.g:
 
+###  Lazy
+
+```lua
+{ 
+    "danymat/neogen", 
+    dependencies = "nvim-treesitter/nvim-treesitter", 
+    config = true,
+    -- Uncomment next line if you want to follow only stable versions
+    -- version = "*" 
+}
+```
+
+### Packer
+
 ```lua
 use {
     "danymat/neogen",
@@ -55,10 +69,10 @@ use {
 - If you want to keep it simple, you can use the `:Neogen` command:
 
 ```vim
-" will generate annotation for the function you're inside
+" will generate annotation for the function, class or other relevant type you're currently in
 :Neogen
-" or you can force a certain type of annotation.
-" It'll find the next upper node that matches the type
+" or you can force a certain type of annotation with `:Neogen <TYPE>`
+" It'll find the next upper node that matches the type `TYPE`
 " E.g if you're on a method of a class and do `:Neogen class`, it'll find the class declaration and generate the annotation.
 :Neogen func|class|type|...
 ```
@@ -100,7 +114,7 @@ And this is done via the `snippet_engine` option in neogen's setup:
 
 - `snippet_engine` option will use provided engine to place the annotations:
 
-Currently supported: `luasnip`, `snippy`.
+Currently supported: `luasnip`, `snippy`, `vsnip`.
 
 ```lua
 require('neogen').setup({ snippet_engine = "luasnip" })
@@ -147,8 +161,8 @@ cmp.setup {
     -- You must set mapping if you want.
     mapping = {
         ["<tab>"] = cmp.mapping(function(fallback)
-            if require('neogen').jumpable() then
-                require('neogen').jump_next()
+            if neogen.jumpable() then
+                neogen.jump_next()
             else
                 fallback()
             end
@@ -157,8 +171,8 @@ cmp.setup {
             "s",
         }),
         ["<S-tab>"] = cmp.mapping(function(fallback)
-            if require('neogen').jumpable(true) then
-                require('neogen').jump_prev()
+            if neogen.jumpable(true) then
+                neogen.jump_prev()
             else
                 fallback()
             end
@@ -177,10 +191,9 @@ cmp.setup {
 
 ```lua
 require('neogen').setup {
-        enabled = true,             --if you want to disable Neogen
-        input_after_comment = true, -- (default: true) automatic jump (with insert mode) on inserted annotation
-        -- jump_map = "<C-e>"       -- (DROPPED SUPPORT, see [here](#cycle-between-annotations) !) The keymap in order to jump in the annotation fields (in insert mode)
-    }
+    enabled = true,             --if you want to disable Neogen
+    input_after_comment = true, -- (default: true) automatic jump (with insert mode) on inserted annotation
+    -- jump_map = "<C-e>"       -- (DROPPED SUPPORT, see [here](#cycle-between-annotations) !) The keymap in order to jump in the annotation fields (in insert mode)
 }
 ```
 
@@ -201,6 +214,16 @@ require('neogen').setup {
 }
 ```
 
+For example, if you want to quickly add support for new filetypes based around existing ones, you can do like this:
+
+```lua
+require('neogen').setup({
+    languages = {
+        ['cpp.doxygen'] = require('neogen.configurations.cpp')
+    }
+})
+```
+
 ## Supported Languages
 
 There is a list of supported languages and fields, with their annotation style
@@ -209,7 +232,7 @@ There is a list of supported languages and fields, with their annotation style
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | sh              | [Google Style Guide](https://google.github.io/styleguide/shellguide.html) (`"google_bash"`)                                                                                                                                                                                      | `func`, `file`                  |
 | c               | [Doxygen](https://www.doxygen.nl/manual/commands.html) (`"doxygen"`)                                                                                                                                                                                                             | `func`, `file`, `type`          |
-| csharp          | [Xmldoc](https://docs.microsoft.com/fr-fr/dotnet/csharp/language-reference/xmldoc/) (`"xmldoc"`) <br> [Doxygen](https://www.doxygen.nl/manual/commands.html) (`"doxygen"`)                                                                                                       | `func`, `file`, `class`         |
+| cs              | [Xmldoc](https://docs.microsoft.com/fr-fr/dotnet/csharp/language-reference/xmldoc/) (`"xmldoc"`) <br> [Doxygen](https://www.doxygen.nl/manual/commands.html) (`"doxygen"`)                                                                                                       | `func`, `file`, `class`         |
 | cpp             | [Doxygen](https://www.doxygen.nl/manual/commands.html) (`"doxygen"`)                                                                                                                                                                                                             | `func`, `file`, `class`         |
 | go              | [GoDoc](https://go.dev/blog/godoc) (`"godoc"`)                                                                                                                                                                                                                                   | `func`, `type`                  |
 | java            | [Javadoc](https://docs.oracle.com/javase/1.5.0/docs/tooldocs/windows/javadoc.html#documentationcomments) (`"javadoc`)                                                                                                                                                            | `func`, `class`                 |
@@ -229,6 +252,10 @@ There is a list of supported languages and fields, with their annotation style
 
 1. Using the defaults to generate a new language support: [Adding Languages](./docs/adding-languages.md)
 2. (advanced) Only if the defaults aren't enough, please see here: [Advanced Integration](./docs/advanced-integration.md)
+
+Tip: Take a look at this beatiful diagram, showing a representation of the codebase. You can then take a first understanding of what is under the hood. For more details, you can see `:h neogen-develop`.
+    
+![Visualization of this repo](./diagram.svg)
 
 ## GIFS
 

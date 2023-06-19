@@ -16,6 +16,8 @@ local nodes = require("neogen.utilities.nodes")
 local default_locator = require("neogen.locators.default")
 local snippet = require("neogen.snippet")
 local JUMP_TEXT = "$1"
+local ANY_TYPE = "any"
+local all_types_map, reverse_type_map, populated_filetypes = {}, {}, {}
 
 local function todo_text(type)
     local i = require("neogen.types.template").item
@@ -24,6 +26,7 @@ local function todo_text(type)
         [i.Tparam] = todo["tparam"],
         [i.Parameter] = todo["parameter"],
         [i.Return] = todo["return"],
+        [i.Yield] = todo["yield"],
         [i.ReturnTypeHint] = todo["return"],
         [i.ReturnAnonym] = todo["return"],
         [i.ClassName] = todo["class"],
@@ -33,20 +36,69 @@ local function todo_text(type)
         [i.ClassAttribute] = todo["attribute"],
         [i.HasParameter] = todo["parameter"],
         [i.HasReturn] = todo["return"],
+        [i.HasThrow] = todo["throw"],
+        [i.HasYield] = todo["yield"],
         [i.ArbitraryArgs] = todo["args"],
         [i.Kwargs] = todo["kwargs"],
     })[type] or todo["description"]
 end
 
-local function get_parent_node(filetype, typ, language)
+--- Create per filetype table of node types
+---@param filetype string
+---@param language any
+local function populate_filetype(filetype, language)
+    for lang_type, set in pairs(language.parent) do
+        if all_types_map[filetype] == nil then
+            all_types_map[filetype] = {}
+        end
+
+        if reverse_type_map[filetype] == nil then
+            reverse_type_map[filetype] = {}
+        end
+
+        for _, v in ipairs(set) do
+            table.insert(all_types_map[filetype], v)
+            reverse_type_map[filetype][v] = lang_type
+        end
+    end
+end
+
+-- Get nearest parent node
+local function get_parent_node(filetype, node_type, language)
     local parser_name = ts_parsers.ft_to_lang(filetype)
     local parser = vim.treesitter.get_parser(0, parser_name)
     local tstree = parser:parse()[1]
     local tree = tstree:root()
+    local current_node = ts_utils.get_node_at_cursor(0)
+    local match_any = node_type == ANY_TYPE
+    local target_node, target_type
+    local locator = language.locator or default_locator
 
-    language.locator = language.locator or default_locator
-    -- Use the language locator to locate one of the required parent nodes above the cursor
-    return language.locator({ root = tree, current = ts_utils.get_node_at_cursor(0) }, language.parent[typ])
+    -- Get a node. `type` could be a string or table
+    local function get_node(type)
+        return locator({
+            root = tree,
+            current = current_node,
+        }, type)
+    end
+
+    if match_any then
+        -- Populate node types for filetype if not already
+        if populated_filetypes[filetype] == nil then
+            populate_filetype(filetype, language)
+            populated_filetypes[filetype] = true
+        end
+
+        target_node = get_node(all_types_map[filetype])
+
+        -- Lookup node type from a map since type names slightly differ
+        target_type = target_node and reverse_type_map[filetype][target_node:type()]
+    else
+        target_node = get_node(language.parent[node_type])
+        target_type = node_type
+    end
+
+    return target_node, target_type
 end
 
 --- Generates the prefix according to `template` options.
@@ -80,7 +132,7 @@ local function get_place_pos(parent, position, append, typ)
         if typ == "file" then
             row, col = 0, 0
         else
-            row, col = ts_utils.get_node_range(parent)
+            row, col = vim.treesitter.get_node_range(parent)
         end
     end
 
@@ -190,7 +242,7 @@ local function generate_content(parent, data, template, required_type, annotatio
 end
 
 return setmetatable({}, {
-    __call = function(_, filetype, typ, return_snippet, annotation_convention)
+    __call = function(_, filetype, node_type, return_snippet, annotation_convention)
         if filetype == "" then
             notify("No filetype detected", vim.log.levels.WARN)
             return
@@ -200,12 +252,14 @@ return setmetatable({}, {
             notify("Language " .. filetype .. " not supported.", vim.log.levels.WARN)
             return
         end
-        typ = (type(typ) ~= "string" or typ == "") and "func" or typ -- Default type
+        node_type = (type(node_type) ~= "string" or node_type == "") and ANY_TYPE or node_type -- Default type
+
         local template = language.template
-        if not language.parent[typ] or not language.data[typ] or not template or not template.annotation_convention then
-            notify("Type `" .. typ .. "` not supported", vim.log.levels.WARN)
+        if not template or not template.annotation_convention then
+            notify("Language " .. filetype .. " does not support any annotation convention", vim.log.levels.WARN)
             return
         end
+
         annotation_convention = annotation_convention or {}
         if annotation_convention[filetype] and not template[annotation_convention[filetype]] then
             notify(
@@ -218,21 +272,23 @@ return setmetatable({}, {
             return
         end
 
-        local parent_node = get_parent_node(filetype, typ, language)
+        if node_type ~= ANY_TYPE then
+            if not language.parent[node_type] or not language.data[node_type] then
+                notify("Type `" .. node_type .. "` not supported", vim.log.levels.WARN)
+                return
+            end
+        end
+
+        local parent_node, node_type = get_parent_node(filetype, node_type, language)
         if not parent_node then
             return
         end
 
-        local data = granulator(parent_node, language.data[typ])
+        local data = granulator(parent_node, language.data[node_type])
 
         -- Will try to generate the documentation from a template and the data found from the granulator
-        local row, template_content, default_text = generate_content(
-            parent_node,
-            data,
-            template,
-            typ,
-            annotation_convention[filetype]
-        )
+        local row, template_content, default_text =
+            generate_content(parent_node, data, template, node_type, annotation_convention[filetype])
 
         local content = {}
         local marks_pos = {}
