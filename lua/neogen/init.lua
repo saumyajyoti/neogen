@@ -241,6 +241,12 @@ end
 ---
 --- Note: We will only document `major` and `minor` versions, not `patch` ones. (only X and Y in X.Y.z)
 ---
+--- ## 2.17.1~
+---   - Python raises now supports `raise foo.Bar()` syntax
+--- ## 2.17.0~
+---   - Python now supports dataclass attributes (#126)
+--- ## 2.16.0~
+---   - Add support for `nvim` snippet engine (default nvim snippet engine) ! (see |neogen-snippet-integration|)
 --- ## 2.15.0~
 ---   - Google docstrings now include "Yields:", whenever possible
 --- ## 2.14.0~
@@ -299,7 +305,7 @@ end
 ---     with multiple annotation conventions.
 ---@tag neogen-changelog
 ---@toc_entry Changes in neogen plugin
-neogen.version = "2.15.2"
+neogen.version = "2.17.1"
 --minidoc_afterlines_end
 
 return neogen
